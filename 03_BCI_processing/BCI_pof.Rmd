@@ -1,0 +1,103 @@
+---
+title: "Investigation of BCI for word-naming errors in one aphasia patient"
+output: html_notebook
+---
+
+<h2>preparation of data</h2>
+
+We start by loading the data for our participant. the data were extracted using matlab/eeglab, by resampling the eeg data at 50Hz and extracting the second ICA component epochs
+
+```{r include=FALSE}
+library(ggpubr)
+library(caret)
+library(tidyverse)
+library(e1071)
+library(signal)
+
+#Loading data from matrix
+data<-as.matrix(read.table('correct'))
+#keeping only the second ICA component, and removing first column (component number)
+IC2<-data[2,-1]
+#convert into matrix to separate epochs
+correct<-matrix(IC2,ncol = 150)
+#define elliptical filter to extract theta band
+filt<-ellip(10, 1, 1, c(4/25,10/25), type = "pass", plane = "z")
+#filter all epochs to extract theta band (4-10Hz)
+for (i in 1:nrow(correct)){
+s<-filter(filt, correct[i,])
+if(i==1){correct_filtered<-s}
+else{correct_filtered<-rbind(correct_filtered,s)}
+}
+#transform into data frame and add prediction value
+performance<-rep('correct',nrow(correct_filtered))
+correct<-data.frame(performance,correct_filtered)
+
+#repeat the above operations for incorrect trials
+data<-as.matrix(read.table('incorrect'))
+IC2<-data[2,-1]
+incorrect<-matrix(IC2,ncol = 150)
+filt<-ellip(10, 1, 1, c(4/25,10/25), type = "pass", plane = "z")
+for (i in 1:nrow(incorrect)){
+s<-filter(filt, incorrect[i,])
+if(i==1){incorrect_filtered<-s}
+else{incorrect_filtered<-rbind(incorrect_filtered,s)}
+}
+performance<-rep('incorrect',nrow(incorrect_filtered))
+incorrect<-data.frame(performance,incorrect_filtered)
+
+#concatenate the data frames to get all the trials
+data<-rbind(correct,incorrect)
+
+
+```
+
+```{r}
+#Visualize data frame
+head(data)
+```
+
+
+
+<h2>Step 2: SVM classification : Errors vs Correct guesses</h2>
+
+
+This step uses SVM to predict the type of stimulus (std or deviant). 
+
+We isolate 10% of the data to use as testing. We run a 10-fold cross-validation process on the 90$% remaining to train a SVM model. The best model is then used to predict the response of the testing data. Accuracy, specificity and sensitivity, as well as the chance level (equal to the accuracy achieved by always predicting the most frequent class -here Correct-) are computed from the testing data.
+
+This process is repeated 20 times to account for the randomness of the split between training/testing data.
+
+```{r}
+a<-c(0,0)
+for(i in 1:20){
+
+#create partition
+intrain <- createDataPartition(y = data$performance, p= 0.9, list = FALSE)
+training <- data[intrain,]
+testing <- data[-intrain,]
+
+#training the model
+svm_Linear <- svm(performance ~ ., data = training,scale=FALSE,cross=10)
+
+#prediction on new data
+test_pred <- predict(svm_Linear,testing)
+
+#computing confusion matrix
+conf<-confusionMatrix(test_pred,testing$performance)
+
+a[i]<-conf$overall['Accuracy']
+}
+
+mean(a)
+```
+
+```{r}
+#Visualize weights
+w<-t(svm_Linear$coefs) %*% svm_Linear$SV
+w <- apply(w, 2, function(v){sqrt(sum(v^2))})
+
+
+plot(w,xaxt="n")
+axis(1,seq(0, length(w), by=10),labels=seq(-1, 2, by=0.2))
+```
+

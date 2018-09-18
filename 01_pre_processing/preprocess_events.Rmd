@@ -1,0 +1,56 @@
+---
+title: "Reformating of the event file"
+output: html_notebook
+---
+
+
+
+```{r}
+library(tidyverse)
+
+#the event file has been pre-processed by removing all the "#" symbols (that prevent reading)
+events<-read.table('Aphasia 2R.evt',skip=8,sep='\t',fill=TRUE)
+
+colnames(events)<-c("stimulus","void","type","channel","onset","duration","v1","v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","cel","condition","v13","v14","v15","v16","obs","obs2","pos","pos2","arg","arg2","x1","x2","x3","x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","word")
+
+
+#import the file from EGI containing real latencies
+data2<-read.table("events_from_EGI_2R.csv",skip=7)
+colnames(data2)<-c("y1","y2","real_latency","y4")
+
+#concatenate the 2 data frames
+events<-cbind(events,data2)
+
+#select only condition 2 (unfacilitated), and isolate TRSP (containing stimulus word) and Pic2 (onset of the stimulus)
+events_pre<-events%>%
+  select(stimulus,onset,condition,word,obs2,real_latency)%>%
+  filter((stimulus=="Pic2"|stimulus=="TRSP")&condition==2)
+
+word_names<-events_pre%>%
+  filter(stimulus=="TRSP")%>%
+  select(obs2,word)
+
+stim_onset<-events_pre%>%
+  filter(stimulus=="Pic2")%>%
+  select(obs2,onset,real_latency)
+
+final_events<-stim_onset%>%
+  inner_join(word_names,by="obs2")%>%
+  mutate(word=substr(as.character(word),1,nchar(as.character(word))-4))%>%
+  mutate(onset=substr(as.character(onset),2,nchar(as.character(onset))))%>%
+  mutate(latency=as.double(strptime(onset,format='%H:%M:%S'))-as.double(strptime('00:00:00',format='%H:%M:%S'))+as.double(substr(onset,nchar(onset)-3,nchar(onset))))
+```
+
+Relabeling :
+```{r}
+incorrect<-sapply(read.table('incorrect.txt'), tolower)
+reject<-sapply(read.table('reject.txt'), tolower)
+
+output<-final_events%>%
+  filter(!(word %in% reject))%>%  #reject words that were named early
+  mutate(type=factor(word %in% incorrect, labels = c('correct', 'incorrect')))%>% #change labels to incorrect or correct based on response
+  select(real_latency,type)
+
+write.table(output,"events.txt",sep="\t",row.names=FALSE)
+
+```
